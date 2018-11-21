@@ -1,7 +1,7 @@
 
 bad_case/
 table_excel/
-table_html/
+table_csv/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
