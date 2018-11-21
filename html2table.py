@@ -1,10 +1,11 @@
+# -*- coding: utf-8 -*-
 from html_table_extractor.extractor import Extractor
 import os
 import pandas as pd
 import numpy as np
 import re
-from itertools import groupby
-
+from io import open
+from bs4 import BeautifulSoup
 
 column2pattern = {
     '公司': r'.+',
@@ -18,13 +19,23 @@ column2pattern = {
 }
 
 
-def extract_relation(table: pd.DataFrame, relation='客户'):
-    table = table.rename(columns=table.iloc[0]).drop([0])
+def extract_relation(table, relation):
+    print(table)
 
-    if relation not in str(table.columns):
+
+def divide_table(table, relation='客户'):
+    # table = table.rename(columns=table.iloc[0]).drop([0])
+
+    try:
+        if relation not in str(table.loc[[0, 1], :]):
+            return None
+    except:
         return None
 
     typeList = {}
+    previousType = ''
+    sameCnt = 1
+    subTableIndex = []
     for _, row in table.iterrows():
         l = ''
 
@@ -47,6 +58,21 @@ def extract_relation(table: pd.DataFrame, relation='客户'):
             typeList[l] = [_]
         else:
             typeList[l].append(_)
+
+        if previousType == l:
+            sameCnt += 1
+            subTableIndex.append(_)
+        else:
+            if sameCnt > 2:
+                extract_relation(table, relation)
+
+            sameCnt = 1
+            previousType = l
+            subTableIndex = [_]
+
+    if sameCnt > 2:
+        extract_relation(table, relation)
+    return
 
     pattern = max(typeList.keys(), key=lambda x: len(typeList[x]))
     table = table.drop(set(table.index) - set(typeList[pattern]))
@@ -87,12 +113,14 @@ if __name__ == '__main__':
 
         tables = []
 
-        for i, text in enumerate(open(path + file, encoding='utf8').read().split('<br>')):
+        for i, text in enumerate(open(path + file, encoding='utf8').read().split(u'<br>')):
 
             if len(text) < 5:
                 continue
 
-            table = pd.DataFrame(Extractor(text).parse()._output, index=None, columns=None)
+            table = Extractor(unicode(text))
+            table._table = BeautifulSoup(unicode(text), 'html.parser').find(u'table')
+            table = pd.DataFrame(table.parse().return_list(), index=None, columns=None)
 
             pre = None
             toDel = []
@@ -110,8 +138,8 @@ if __name__ == '__main__':
                 tables.append(pd.DataFrame(table.values))
 
             if analyze:
-                extract_relation(table, '客户')
-                extract_relation(table, '供应商')
+                divide_table(table, '客户')
+                divide_table(table, '供应商')
 
         if toFile:
             data = pd.concat(tables)
