@@ -1,3 +1,8 @@
+
+bad_case/
+table_excel/
+table_html/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
