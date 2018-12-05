@@ -3,7 +3,8 @@ import os
 import pandas as pd
 import numpy as np
 import re
-from itertools import groupby
+import traceback
+import sys
 
 
 column2pattern = {
@@ -18,15 +19,76 @@ column2pattern = {
 }
 
 
-def extract_relation(table: pd.DataFrame, relation='客户'):
-    table = table.rename(columns=table.iloc[0]).drop([0])
+def extract_relation(name, table, relation, rel_index, years=None, unit='万元'):
+    table = table.reset_index()
 
-    if relation not in str(table.columns):
+    company = rel_index
+    company = table.pop(company)
+
+    year = '未知'
+    money = '未知'
+    percentage = '未知'
+
+    for i in table.columns[1:]:
+        df = table[i]
+        if df.str.match(column2pattern['时间']).all():
+            year = i
+        elif df.str.match(column2pattern['占比']).all():
+            percentage = i
+        elif df.str.match(column2pattern['金额']).all():
+            money = i
+
+    table['未知'] = '未知'
+
+    year = table.pop(year)
+    table['未知'] = '未知'
+    money = table.pop(money)
+    table['未知'] = '未知'
+    percentage = table.pop(percentage)
+    content = table.pop(table.columns[-1])
+
+    table['单位'] = unit
+    unit = table['单位']
+    table['公司'] = name
+    name = table['公司']
+    table['类型'] = relation
+    relation = table.pop('类型')
+
+    if years:
+        table['时间'] = years
+        year = table['时间']
+
+    l = pd.concat([name, relation, year, company, content, money, percentage, unit], axis=1)
+    l.columns = ['公司', '类型', '时间', '名称', '内容', '金额', '占比', '金额单位']
+
+    return l
+
+
+def divide_table(name, table: pd.DataFrame, relation='客户'):
+    # table = table.rename(columns=table.iloc[0]).drop([0])
+
+    clean = pd.DataFrame(columns=['公司', '类型', '时间', '名称', '内容', '金额', '占比', '金额单位'])
+    rel_idx = -1
+
+    if relation not in str(table.loc[[0, 1, 2], :]):
         return None
+    else:
+        for i in table.columns:
+            if relation in table.loc[0, i] or relation in table.loc[1, i] or relation in table.loc[2, i]:
+                rel_idx = i
+                break
 
     typeList = {}
+    previousType = ''
+    sameCnt = 1
+    subTableIndex = []
+    year = None
     for _, row in table.iterrows():
         l = ''
+
+        temp = list(set(row))
+        if len(temp) == 1 and temp[0] =='987.654':
+            continue
 
         for cell in row:
             cell = str(cell).strip()
@@ -48,44 +110,60 @@ def extract_relation(table: pd.DataFrame, relation='客户'):
         else:
             typeList[l].append(_)
 
-    pattern = max(typeList.keys(), key=lambda x: len(typeList[x]))
-    table = table.drop(set(table.index) - set(typeList[pattern]))
+        if previousType == l:
+            sameCnt += 1
+            subTableIndex.append(_)
+        elif l.replace('Short', 'Long') == previousType:
+            continue
+        else:
+            if sameCnt > 2:
+                df = extract_relation(name, table.loc[subTableIndex, :], relation, rel_idx, year)
+                clean = pd.concat([clean, df])
+                year = None
 
-    company = ''
-    year = ''
-    money = ''
-    percentage = ''
-    for i in table.columns:
-        if isinstance(table[i], pd.DataFrame):
-            break
-        if relation in i:
-            company = i
-        elif table[i].str.match(column2pattern['时间']).all():
-            year = i
-        elif table[i].str.match(column2pattern['金额']).all():
-            money = i
-        elif table[i].str.match(column2pattern['占比']).all():
-            percentage = i
+            if 'Year' in l:
+                year = re.search(column2pattern['时间'], str(row)).groups()[0]
+            sameCnt = 1
+            previousType = l
+            subTableIndex = [_]
 
-    company = table.pop(company)
-    year = table.pop(year)
-    money = table.pop(money)
-    percentage = table.pop(percentage)
-    content = table.pop(table.columns[0])
-    unit = '元'
-
-    l = pd.concat([company, year, money, percentage, content, unit], axis=1)
-    return l.values().tolist()
+    if sameCnt > 2:
+        df = extract_relation(name, table.loc[subTableIndex, :], relation, rel_idx, year)
+        clean = pd.concat([clean, df])
+    return clean
 
 
 if __name__ == '__main__':
+
+    company_name = {}
+    for line in open('id-filename-name.txt', encoding='utf8'):
+        line = line.strip().split('\t')
+        company_name[line[0]] = line[2]
+
+    key = set()
+    for file in os.listdir('answer/'):
+        for line in open('answer/' + file, encoding='utf8'):
+            line = line.strip().split('\t')
+
+            if len(line) < 4:
+                continue
+
+            key.add(line[0] + line[1] + line[3])
+
     path = './table_html/'
     toFile = False
     analyze = True
+    ans = set()
 
     for file in os.listdir(path):
 
         tables = []
+        clean = pd.DataFrame(columns=['公司', '类型', '时间', '名称', '内容', '金额', '占比', '金额单位'])
+
+        try:
+            company = company_name[file[:4]]
+        except KeyError as e:
+            company = file[5:-8]
 
         for i, text in enumerate(open(path + file, encoding='utf8').read().split('<br>')):
 
@@ -110,8 +188,20 @@ if __name__ == '__main__':
                 tables.append(pd.DataFrame(table.values))
 
             if analyze:
-                extract_relation(table, '客户')
-                extract_relation(table, '供应商')
+                table = table.fillna('987.654')
+                try:
+                    clean = pd.concat(
+                        [clean, divide_table(company, table, '客户'), divide_table(company, table, '供应商')])
+                except Exception as e:
+                    traceback.print_exc(file=sys.stdout)
+                    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+                        print(table)
+                    print('==============' + file)
+                    try:
+                        clean = pd.concat(
+                            [clean, divide_table(company, table, '客户'), divide_table(company, table, '供应商')])
+                    except:
+                        pass
 
         if toFile:
             data = pd.concat(tables)
@@ -119,4 +209,13 @@ if __name__ == '__main__':
             data.to_csv('table_csv/' + file + '.tsv', sep='\t', encoding='utf8', index=None, columns=None, header=None)
 
         if analyze:
-            pass
+            clean = clean.reset_index()
+            del clean['index']
+            clean.to_excel('clean/' + file + '.xlsx', index=None)
+
+            for _, row in clean.iterrows():
+                ans.add(row['公司'] + row['类型'] + row['名称'].strip())
+
+    print(len(key))
+    print(len(ans))
+    print(len(key & ans))
