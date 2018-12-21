@@ -74,9 +74,13 @@ def divide_table(name, table: pd.DataFrame, relation='客户'):
         return None
     else:
         for i in table.columns:
-            if relation in table.loc[0, i] or relation in table.loc[1, i] or relation in table.loc[2, i]:
-                rel_idx = i
-                break
+            for j in range(3):
+                if relation in table.loc[j, i] and isinstance(table.loc[j, i], str) and len(table.loc[j, i].strip()) < 15:
+                    rel_idx = i
+                    break
+
+    if rel_idx < 0:
+        return None
 
     typeList = {}
     previousType = ''
@@ -96,7 +100,7 @@ def divide_table(name, table: pd.DataFrame, relation='客户'):
                 l += 'Year#'
             elif re.search(column2pattern['占比'], cell):
                 l += 'Percent#'
-            elif re.search(column2pattern['金额'], cell) and len(cell) > 1:
+            elif re.search(column2pattern['金额'], cell) and (len(cell) > 2 or (len(cell) == 2 and cell != '10')):
                 l += 'Money#'
             elif re.match('\d+', cell):
                 l += 'Number#'
@@ -169,6 +173,11 @@ if __name__ == '__main__':
 
             if len(text) < 5:
                 continue
+
+            if '客户' not in text and '供应商' not in text:
+                continue
+
+            open('target_html/' + company + '.html', 'a', encoding='utf8').write(text.strip() + '\n<br>\n')
 
             table = pd.DataFrame(Extractor(text).parse()._output, index=None, columns=None)
 
