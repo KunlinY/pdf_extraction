@@ -70,12 +70,12 @@ def divide_table(name, table: pd.DataFrame, relation='客户'):
     clean = pd.DataFrame(columns=['公司', '类型', '时间', '名称', '内容', '金额', '占比', '金额单位'])
     rel_idx = -1
 
-    if relation not in str(table.loc[[0, 1, 2], :]):
+    if relation not in str(table.loc[[0, 1, 2], :]) or len(table.columns) < 4:
         return None
     else:
         for i in table.columns:
             for j in range(3):
-                if relation in table.loc[j, i] and isinstance(table.loc[j, i], str) and len(table.loc[j, i].strip()) < 15:
+                if relation in table.loc[j, i] and isinstance(table.loc[j, i], str) and len(table.loc[j, i].strip()) < 10:
                     rel_idx = i
                     break
 
@@ -104,7 +104,7 @@ def divide_table(name, table: pd.DataFrame, relation='客户'):
                 l += 'Money#'
             elif re.match('\d+', cell):
                 l += 'Number#'
-            elif len(cell) < 4:
+            elif len(cell) < 4 and ('计' in cell or '号' in cell):
                 l += 'Short#'
             else:
                 l += 'Long#'
@@ -181,16 +181,31 @@ if __name__ == '__main__':
 
             table = pd.DataFrame(Extractor(text).parse()._output, index=None, columns=None)
 
+            # delete same column
             pre = None
             toDel = []
-
             for column in table:
                 if pre and table[column].equals(table[pre]):
                     toDel.append(column)
+                    continue
                 else:
                     pre = column
-
+                if all([not x or len(x.strip()) < 3 for x in table[column][1:]]):
+                    toDel.append(column)
             table.drop(table.columns[toDel], axis=1, inplace=True)
+
+            pre = None
+            toDel = []
+            for idx, row in table.iterrows():
+                if pre and list(row) == pre:
+                    toDel.append(idx)
+                else:
+                    pre = list(row)
+            table.drop(toDel, axis=0, inplace=True)
+
+            table = table.reset_index()
+            del table['index']
+            table.columns = list(range(table.shape[1]))
 
             if toFile:
                 table = table.append(pd.Series([np.nan]), ignore_index=True)
