@@ -8,7 +8,7 @@ import sys
 
 
 column2pattern = {
-    '公司': r'.+',
+    '公司': r'^[^A-Z]+商',
     '类型': r'.+',
     '时间': r'.*([1-3][0-9]{3})',
     '名称': r'.+',
@@ -23,6 +23,20 @@ def extract_relation(name, table, relation, rel_index, years=None, unit='万元'
     table = table.reset_index()
 
     company = rel_index
+
+    temp = table[company].tolist()
+    flag = False
+    for i in temp:
+        i = re.sub('(\d|,|\.)+', '', i.strip())
+        if len(i) == 0:
+            flag = True
+            break
+    if flag:
+        return pd.DataFrame()
+
+    if table[company].str.match(column2pattern['公司']).all():
+        company = company - 1
+
     company = table.pop(company)
 
     year = '未知'
@@ -60,6 +74,8 @@ def extract_relation(name, table, relation, rel_index, years=None, unit='万元'
 
     l = pd.concat([name, relation, year, company, content, money, percentage, unit], axis=1)
     l.columns = ['公司', '类型', '时间', '名称', '内容', '金额', '占比', '金额单位']
+    l = l.replace('{客户}', '销售', regex=True)
+    l = l.replace('987.654', '', regex=True)
 
     return l
 
@@ -73,7 +89,7 @@ def divide_table(name, table: pd.DataFrame, relation='客户'):
     if relation not in str(table.loc[[0, 1, 2], :]) or len(table.columns) < 4:
         return None
     else:
-        for i in table.columns:
+        for i in reversed(table.columns):
             for j in range(3):
                 if relation in table.loc[j, i] and isinstance(table.loc[j, i], str) and len(table.loc[j, i].strip()) < 10:
                     rel_idx = i
@@ -104,7 +120,7 @@ def divide_table(name, table: pd.DataFrame, relation='客户'):
                 l += 'Money#'
             elif re.match('\d+', cell):
                 l += 'Number#'
-            elif len(cell) < 4 and ('计' in cell or '号' in cell):
+            elif len(cell) < 3 or (len(cell) < 5 and ('计' in cell or '号' in cell or '度' in cell or '入' in cell)):
                 l += 'Short#'
             else:
                 l += 'Long#'
@@ -120,7 +136,7 @@ def divide_table(name, table: pd.DataFrame, relation='客户'):
         elif l.replace('Short', 'Long') == previousType:
             continue
         else:
-            if sameCnt > 2:
+            if sameCnt >= 2:
                 df = extract_relation(name, table.loc[subTableIndex, :], relation, rel_idx, year)
                 clean = pd.concat([clean, df])
                 year = None
@@ -131,7 +147,7 @@ def divide_table(name, table: pd.DataFrame, relation='客户'):
             previousType = l
             subTableIndex = [_]
 
-    if sameCnt > 2:
+    if sameCnt >= 2:
         df = extract_relation(name, table.loc[subTableIndex, :], relation, rel_idx, year)
         clean = pd.concat([clean, df])
     return clean
@@ -152,9 +168,9 @@ if __name__ == '__main__':
             if len(line) < 4:
                 continue
 
-            key.add(line[0] + line[1] + line[3])
+            key.add(line[0] + '\t' + line[1] + '\t' + line[3])
 
-    path = './table_html/'
+    path = './chapter_table_new/'
     toFile = False
     analyze = True
     ans = set()
@@ -169,17 +185,26 @@ if __name__ == '__main__':
         except KeyError as e:
             company = file[5:-8]
 
+        truth = set([x for x in key if company in x])
+
         for i, text in enumerate(open(path + file, encoding='utf8').read().split('<br>')):
 
             if len(text) < 5:
                 continue
+
+            text = text.replace('销售', '{客户}')
 
             if '客户' not in text and '供应商' not in text:
                 continue
 
             open('target_html/' + company + '.html', 'a', encoding='utf8').write(text.strip() + '\n<br>\n')
 
-            table = pd.DataFrame(Extractor(text).parse()._output, index=None, columns=None)
+            table = Extractor(text).parse()._output
+
+            if '客户' not in str(table) and '供应商' not in str(table):
+                continue
+
+            table = pd.DataFrame(table, index=None, columns=None)
 
             # delete same column
             pre = None
@@ -190,14 +215,14 @@ if __name__ == '__main__':
                     continue
                 else:
                     pre = column
-                if all([not x or len(x.strip()) < 3 for x in table[column][1:]]):
+                if all([not x or len(x.strip()) < 3 for x in table[column][1:]]) or table[column].isnull().all():
                     toDel.append(column)
             table.drop(table.columns[toDel], axis=1, inplace=True)
 
             pre = None
             toDel = []
             for idx, row in table.iterrows():
-                if pre and list(row) == pre:
+                if pre and list(row) == pre or row.isnull().all():
                     toDel.append(idx)
                 else:
                     pre = list(row)
@@ -212,15 +237,20 @@ if __name__ == '__main__':
                 tables.append(pd.DataFrame(table.values))
 
             if analyze:
+                try:
+                    if not any([col.str.match('\d+').any() for _, col in table.iterrows()]):
+                        continue
+                except:
+                    pass
                 table = table.fillna('987.654')
                 try:
                     clean = pd.concat(
                         [clean, divide_table(company, table, '客户'), divide_table(company, table, '供应商')])
                 except Exception as e:
-                    traceback.print_exc(file=sys.stdout)
-                    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-                        print(table)
-                    print('==============' + file)
+                    # traceback.print_exc(file=sys.stdout)
+                    # with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+                    #     print(table)
+                    # print('==============' + file)
                     try:
                         clean = pd.concat(
                             [clean, divide_table(company, table, '客户'), divide_table(company, table, '供应商')])
@@ -237,9 +267,20 @@ if __name__ == '__main__':
             del clean['index']
             clean.to_excel('clean/' + file + '.xlsx', index=None)
 
+            actual = set()
+
             for _, row in clean.iterrows():
-                ans.add(row['公司'] + row['类型'] + row['名称'].strip())
+                ans.add(row['公司'] + '\t' + row['类型'] + '\t' + row['名称'].strip())
+                actual.add(row['公司'] + '\t' + row['类型'] + '\t' + row['名称'].strip())
+
+            print(company, len(truth), len(actual), len(truth & actual))
 
     print(len(key))
     print(len(ans))
     print(len(key & ans))
+
+    out = pd.DataFrame()
+    for f in os.listdir('./clean'):
+        d = pd.read_excel('clean/' + f)
+        out = pd.concat([out, d])
+    out.drop_duplicates().to_excel('out.xlsx')
