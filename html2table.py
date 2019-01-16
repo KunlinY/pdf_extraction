@@ -10,7 +10,7 @@ import sys
 column2pattern = {
     '公司': r'^[^A-Z]+商',
     '类型': r'.+',
-    '时间': r'.*([1-3][0-9]{3})',
+    '时间': r'[^0-9]*([1-3][0-9]{3})([^.,0-9]|$)',
     '名称': r'.+',
     '内容': r'.+',
     '金额': r'(\d{1,3})(,\d{1,3})*(\.\d{1,})?',
@@ -24,14 +24,19 @@ def extract_relation(name, table, relation, rel_index, years=None, unit='万元'
 
     company = rel_index
 
-    temp = table[company].tolist()
-    flag = False
-    for i in temp:
-        i = re.sub('(\d|,|\.)+', '', i.strip())
-        if len(i) == 0:
-            flag = True
+    while company >= 0:
+        flag = False
+        temp = table[company].tolist()
+        for i in temp:
+            i = re.sub('(\d|,|\.)+', '', i.strip())
+            if len(i) == 0:
+                flag = True
+                break
+        if flag:
+            company = company - 1
+        else:
             break
-    if flag:
+    if company < 0:
         return pd.DataFrame()
 
     if table[company].str.match(column2pattern['公司']).all():
