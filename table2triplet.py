@@ -3,8 +3,7 @@ import os
 import pandas as pd
 import numpy as np
 import re
-import traceback
-import sys
+import argparse
 
 
 column2pattern = {
@@ -17,6 +16,18 @@ column2pattern = {
     '占比': r'(100|([0-9]{1,2})|([0-9]{1,2}\,[0-9]{1,3}))(\.\d{1,})?%',
     '金额单位': r'.+'
 }
+parser = argparse.ArgumentParser()
+parser.add_argument('--filename_id', dest='filename_id', default='id-filename-name.txt')
+parser.add_argument('--answer_dir', dest='answer_dir', default='answer')
+parser.add_argument('--table_dir', dest='table_dir', default='chapter_table_new')
+parser.add_argument('--target_html', dest='target_html', default='target_html')
+parser.add_argument('--table_excel', dest='table_excel', default='table_excel')
+parser.add_argument('--table_csv', dest='table_csv', default='table_csv')
+parser.add_argument('--out_dir', dest='out_dir', default='clean')
+parser.add_argument('--out_excel', dest='out_excel', default='out.xlsx')
+parser.add_argument('--toFile', dest='toFile', default=False, type=bool)
+parser.add_argument('--analyze', dest='analyze', default=True, type=bool)
+args = vars(parser.parse_args())
 
 
 def extract_relation(name, table, relation, rel_index, years=None, unit='万元'):
@@ -161,13 +172,13 @@ def divide_table(name, table: pd.DataFrame, relation='客户'):
 if __name__ == '__main__':
 
     company_name = {}
-    for line in open('id-filename-name.txt', encoding='utf8'):
+    for line in open(args['filename_id'], encoding='utf8'):
         line = line.strip().split('\t')
         company_name[line[0]] = line[2]
 
     key = set()
-    for file in os.listdir('answer/'):
-        for line in open('answer/' + file, encoding='utf8'):
+    for file in os.listdir(args['answer_dir']):
+        for line in open(os.path.join(args['answer_dir'], file), encoding='utf8'):
             line = line.strip().split('\t')
 
             if len(line) < 4:
@@ -175,7 +186,7 @@ if __name__ == '__main__':
 
             key.add(line[0] + '\t' + line[1] + '\t' + line[3])
 
-    path = './chapter_table_new/'
+    path = args['table_dir']
     toFile = False
     analyze = True
     ans = set()
@@ -192,7 +203,7 @@ if __name__ == '__main__':
 
         truth = set([x for x in key if company in x])
 
-        for i, text in enumerate(open(path + file, encoding='utf8').read().split('<br>')):
+        for i, text in enumerate(open(os.path.join(path, file), encoding='utf8').read().split('<br>')):
 
             if len(text) < 5:
                 continue
@@ -202,7 +213,7 @@ if __name__ == '__main__':
             if '客户' not in text and '供应商' not in text:
                 continue
 
-            open('target_html/' + company + '.html', 'a', encoding='utf8').write(text.strip() + '\n<br>\n')
+            open(os.path.join('target_html', company + '.html'), 'a', encoding='utf8').write(text.strip() + '\n<br>\n')
 
             table = Extractor(text).parse()._output
 
@@ -264,13 +275,13 @@ if __name__ == '__main__':
 
         if toFile:
             data = pd.concat(tables)
-            data.to_excel('table_excel/' + file + '.xlsx', index=None, columns=None, header=None)
-            data.to_csv('table_csv/' + file + '.tsv', sep='\t', encoding='utf8', index=None, columns=None, header=None)
+            data.to_excel(os.path.join(args['table_excel'], file + '.xlsx'), index=None, columns=None, header=None)
+            data.to_csv(os.path.join(args['table_csv'], file + '.tsv'), sep='\t', encoding='utf8', index=None, columns=None, header=None)
 
         if analyze:
             clean = clean.reset_index()
             del clean['index']
-            clean.to_excel('clean/' + file + '.xlsx', index=None)
+            clean.to_excel(os.path.join(args['out_dir'], file + '.xlsx'), index=None)
 
             actual = set()
 
@@ -285,7 +296,7 @@ if __name__ == '__main__':
     print(len(key & ans))
 
     out = pd.DataFrame()
-    for f in os.listdir('./clean'):
-        d = pd.read_excel('clean/' + f)
+    for f in os.listdir(args['clean']):
+        d = pd.read_excel(os.path.join(args['clean'], f))
         out = pd.concat([out, d])
-    out.drop_duplicates().to_excel('out.xlsx')
+    out.drop_duplicates().to_excel(args['out_excel'])
